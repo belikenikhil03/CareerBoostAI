@@ -3,6 +3,7 @@ from app import fetch_linkedin_jobs,fetch_naukri_jobs
 
 
 
+
 mcp = FastMCP("fetch job")
 
 

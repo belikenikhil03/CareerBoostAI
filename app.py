@@ -5,6 +5,7 @@ from euriai import EuriaiClient
 from dotenv import load_dotenv
 from apify_client import ApifyClient
 
+
 # Load environment variables
 load_dotenv()
 

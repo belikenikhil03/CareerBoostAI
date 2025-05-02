@@ -8,6 +8,11 @@ from PIL import Image
 from dotenv import load_dotenv
 from apify_client import ApifyClient
 from euriai import EuriaiClient
+import base64
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 # Load environment variables
 load_dotenv()
@@ -44,63 +49,102 @@ def extract_text_from_pdf(uploaded_file):
     except Exception as e:
         return f"Error extracting text from PDF: {str(e)}"
 
-# Extract skills from resume text using simple pattern matching
-def extract_skills(resume_text):
-    # Common tech skills to look for
-    common_skills = [
-        "python", "javascript", "java", "c\\+\\+", "c#", "sql", "react", 
-        "node\\.?js", "html", "css", "angular", "vue", "django", "flask",
-        "spring", "docker", "kubernetes", "aws", "azure", "gcp", "excel",
-        "tableau", "power bi", "git", "machine learning", "ai", "data analysis",
-        "data science", "web development", "cloud", "devops", "agile", "scrum"
-    ]
+# Extract skills using EuriAI client
+def extract_skills_from_resume(resume_text):
+    # Use EuriAI to extract skills with improved prompt
+    skills_prompt = f"""Extract the top 10 technical skills from this resume.
+    Return ONLY a comma-separated list of skills, no additional text or explanations.
+    Make sure your response is complete and not cut off.
     
-    resume_lower = resume_text.lower()
-    skills_found = []
+    Resume text:
+    {resume_text}"""
     
-    for skill in common_skills:
-        # Use regex to find whole word matches
-        pattern = r'\b' + skill + r'\b'
-        matches = re.findall(pattern, resume_lower)
-        if matches:
-            # Generate a pseudo-random but consistent score between 60-90
-            score = (hash(skill + resume_lower[:100]) % 30) + 60
-            skills_found.append({"name": skill.replace("\\", "").title(), "level": score})
+    skills_response = ask_euriai(skills_prompt, max_tokens=200)
     
-    # Sort and return skills
-    skills_found.sort(key=lambda x: x["level"], reverse=True)
-    return skills_found[:5]  # Return top 5 skills
+    # Parse the comma-separated response
+    skills_list = [skill.strip() for skill in skills_response.split(',')]
+    return skills_list[:10]  # Ensure we get max 10 skills
 
-# Ask EURI AI to generate output
-def ask_euriai(prompt, max_tokens=500):
-    response = euriai_client.generate_completion(prompt=prompt, temperature=0.5, max_tokens=max_tokens)
+# Clean response to ensure no cut-off HTML
+def clean_response(response):
+    # Remove any cut-off HTML tags at the end
+    cleaned = re.sub(r'<[^>]*$', '', response)
+    return cleaned
+
+# Ask EURI AI to generate output with improved prompts to prevent cutoffs
+def ask_euriai(prompt, max_tokens=800):
+    # Add instructions for complete responses
+    enhanced_prompt = f"""{prompt}
+
+Please provide a complete, well-structured response with no cut-off sentences. 
+Ensure all points are fully explained and properly concluded.
+Do not leave any thoughts incomplete."""
+    
+    response = euriai_client.generate_completion(prompt=enhanced_prompt, temperature=0.5, max_tokens=max_tokens)
     if isinstance(response, dict) and 'choices' in response:
         return response['choices'][0]['message']['content']
     return response
 
-# Fetch LinkedIn Jobs using Apify
-def fetch_linkedin_jobs(search_query, location="India", rows=60):
+# Generate PDF report
+def generate_pdf_report():
     try:
-        run_input = {
-            "title": search_query,
-            "location": location,
-            "rows": rows,
-            "proxy": {
-                "useApifyProxy": True,
-                "apifyProxyGroups": ["RESIDENTIAL"],
-            }
-        }
-        run = apify_client.actor("BHzefUZlZRKWxkTck").call(run_input=run_input)
-        jobs = list(apify_client.dataset(run["defaultDatasetId"]).iterate_items())
-        return jobs
+        # Create buffer
+        buffer = io.BytesIO()
+        
+        # Create document
+        doc = SimpleDocTemplate(buffer, pagesize=A4, title="Career Analysis Report")
+        
+        # Styles
+        styles = getSampleStyleSheet()
+        title_style = styles['Heading1']
+        subtitle_style = styles['Heading2']
+        normal_style = styles['Normal']
+        
+        # Content
+        content = []
+        
+        # Title
+        content.append(Paragraph("Career Analysis Report", title_style))
+        content.append(Spacer(1, 20))
+        
+        # Resume Summary
+        content.append(Paragraph("Resume Summary", subtitle_style))
+        content.append(Spacer(1, 10))
+        content.append(Paragraph(st.session_state.summary, normal_style))
+        content.append(Spacer(1, 20))
+        
+        # Skill Gaps
+        content.append(Paragraph("Skill Gaps & Missing Areas", subtitle_style))
+        content.append(Spacer(1, 10))
+        content.append(Paragraph(st.session_state.gaps, normal_style))
+        content.append(Spacer(1, 20))
+        
+        # Future Roadmap
+        content.append(Paragraph("Future Roadmap & Preparation Strategy", subtitle_style))
+        content.append(Spacer(1, 10))
+        content.append(Paragraph(st.session_state.roadmap, normal_style))
+        content.append(Spacer(1, 20))
+        
+        # Skills List
+        content.append(Paragraph("Your Skills", subtitle_style))
+        content.append(Spacer(1, 10))
+        skills_text = ", ".join(st.session_state.skills)
+        content.append(Paragraph(skills_text, normal_style))
+        
+        # Build PDF
+        doc.build(content)
+        
+        # Get PDF from buffer
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        
+        # Encode to base64 for download
+        b64 = base64.b64encode(pdf_data).decode()
+        href = f'<a href="data:application/pdf;base64,{b64}" download="career_analysis_report.pdf" class="job-apply-btn" style="text-decoration:none;">Download PDF Report</a>'
+        return href
+        
     except Exception as e:
-        st.error(f"Error fetching LinkedIn jobs: {str(e)}")
-        # Return sample data for demonstration
-        return [
-            {"title": "Senior Python Developer", "companyName": "Tech Solutions India", "location": "Bangalore, India", "link": "https://www.linkedin.com/jobs/view/123456"},
-            {"title": "Data Scientist", "companyName": "Data Insights Co.", "location": "Delhi, India", "link": "https://www.linkedin.com/jobs/view/234567"},
-            {"title": "Full Stack Developer", "companyName": "WebTech Systems", "location": "Mumbai, India", "link": "https://www.linkedin.com/jobs/view/345678"}
-        ]
+        return f"Error generating PDF: {str(e)}"
 
 # Fetch Naukri Jobs using Apify
 def fetch_naukri_jobs(search_query, max_jobs=60):
@@ -489,6 +533,15 @@ def load_css():
             display: none;
         }
     }
+    /* Skills list */
+    .skills-list {
+        list-style-type: disc;
+        margin-left: 20px;
+        padding-left: 10px;
+    }
+    .skills-list li {
+        margin-bottom: 8px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -503,21 +556,17 @@ def icon(name):
         "link": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>""",
         "search": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>""",
         "upload": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>""",
-        "filter": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>"""
+        "filter": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>""",
+        "download": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>"""
     }
     return icons.get(name, "")
 
 # Format job cards
-def render_job_card(job, source="linkedin"):
+def render_job_card(job, source="naukri"):
     job_title = job.get('title', 'Position')
     company = job.get('companyName', 'Company')
-    location = job.get('location', '') if source == "linkedin" else job.get('location', '')
-    
-    # Get the correct link based on the source
-    if source == "linkedin":
-        link = job.get('link', '#')
-    else:  # naukri
-        link = job.get('url', '#')
+    location = job.get('location', '')
+    link = job.get('url', '#')
     
     # Make sure link is valid and absolute
     if not link or link == '#':
@@ -537,16 +586,16 @@ def render_job_card(job, source="linkedin"):
     """
     return html
 
-# Animated progress bars
-def progress_bar(progress, label="", detail=""):
+# Render card with proper HTML cleaning
+def render_card(title, icon_name, content):
+    # Clean the content to ensure no cut-off HTML
+    cleaned_content = clean_response(content)
+    
     html = f"""
-    <div style="margin-bottom: 1rem;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-            <div style="color: #64748b; font-size: 0.875rem;">{label}</div>
-            <div style="color: #64748b; font-size: 0.875rem;">{detail}</div>
-        </div>
-        <div style="background-color: #e2e8f0; border-radius: 10px; height: 8px; overflow: hidden;">
-            <div style="background-color: var(--primary-color); height: 100%; width: {progress}%; transition: width 0.5s ease;"></div>
+    <div class="card">
+        <div class="card-title">{icon(icon_name)} {title}</div>
+        <div class="card-content">
+            {cleaned_content}
         </div>
     </div>
     """
@@ -561,7 +610,7 @@ def render_header():
     </div>
     """
 
-# Create progress steps
+# Create progress steps with fixed HTML
 def render_progress_steps(current_step):
     # Create all steps HTML directly without any conditional logic in f-strings
     step1_status = "completed" if current_step > 1 else "active" if current_step == 1 else ""
@@ -636,8 +685,6 @@ def main():
         st.session_state.gaps = None
     if 'roadmap' not in st.session_state:
         st.session_state.roadmap = None
-    if 'linkedin_jobs' not in st.session_state:
-        st.session_state.linkedin_jobs = []
     if 'naukri_jobs' not in st.session_state:
         st.session_state.naukri_jobs = []
     if 'search_keywords' not in st.session_state:
@@ -665,8 +712,6 @@ def main():
             if uploaded_file:
                 with st.spinner("📚 Extracting text from resume..."):
                     st.session_state.resume_text = extract_text_from_pdf(uploaded_file)
-                    # Extract skills directly from the resume text
-                    st.session_state.skills = extract_skills(st.session_state.resume_text)
                     st.session_state.current_step = 2
                     st.rerun()
         
@@ -678,7 +723,7 @@ def main():
                     <p>1. Upload your resume (PDF format)</p>
                     <p>2. Our AI analyzes your skills & experience</p>
                     <p>3. Get personalized career insights</p>
-                    <p>4. Find matching jobs from LinkedIn & Naukri</p>
+                    <p>4. Find matching jobs from Naukri</p>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -691,15 +736,19 @@ def main():
             
             with st.spinner("✍️ Summarizing Resume..."):
                 st.markdown(render_loading("Analyzing resume content..."), unsafe_allow_html=True)
-                st.session_state.summary = ask_euriai(f"Summarize this resume highlighting skills, education, and experience:\n\n{st.session_state.resume_text}", max_tokens=500)
+                st.session_state.summary = ask_euriai(f"Summarize this resume highlighting skills, education, and experience:\n\n{st.session_state.resume_text}", max_tokens=800)
             
             with st.spinner("🔎 Finding Skill Gaps..."):
                 st.markdown(render_loading("Identifying skill gaps..."), unsafe_allow_html=True)
-                st.session_state.gaps = ask_euriai(f"Analyze this resume and highlight missing skills, certifications, or experiences needed for better job opportunities:\n\n{st.session_state.resume_text}", max_tokens=400)
+                st.session_state.gaps = ask_euriai(f"Analyze this resume and highlight missing skills, certifications, or experiences needed for better job opportunities:\n\n{st.session_state.resume_text}", max_tokens=800)
             
             with st.spinner("🚀 Creating Future Roadmap..."):
                 st.markdown(render_loading("Preparing career roadmap..."), unsafe_allow_html=True)
-                st.session_state.roadmap = ask_euriai(f"Based on this resume, suggest a future roadmap to improve this person's career prospects (skills to learn, certifications needed, industry exposure):\n\n{st.session_state.resume_text}", max_tokens=400)
+                st.session_state.roadmap = ask_euriai(f"Based on this resume, suggest a future roadmap to improve this person's career prospects (skills to learn, certifications needed, industry exposure):\n\n{st.session_state.resume_text}", max_tokens=800)
+                
+            # Extract skills using EuriAI
+            with st.spinner("🔍 Extracting Skills..."):
+                st.session_state.skills = extract_skills_from_resume(st.session_state.resume_text)
             
             st.session_state.current_step = 3
             st.rerun()
@@ -711,36 +760,23 @@ def main():
         with col1:
             st.markdown("<h2>Career Insights & Analysis</h2>", unsafe_allow_html=True)
             
-            # Resume Summary
-            st.markdown(f"""
-            <div class="card">
-                <div class="card-title">{icon('resume')} Resume Summary</div>
-                <div class="card-content">
-                    {st.session_state.summary}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            # Resume Summary - using render_card to ensure proper HTML rendering
+            st.markdown(
+                render_card("Resume Summary", "resume", st.session_state.summary),
+                unsafe_allow_html=True
+            )
             
-            # Skill Gaps
-            # Skill Gaps
-            st.markdown(f"""
-            <div class="card">
-                <div class="card-title">{icon('skills')} Skill Gaps & Missing Areas</div>
-                <div class="card-content">
-                    {st.session_state.gaps}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            # Skill Gaps - using render_card to ensure proper HTML rendering
+            st.markdown(
+                render_card("Skill Gaps & Missing Areas", "skills", st.session_state.gaps),
+                unsafe_allow_html=True
+            )
             
-            # Future Roadmap
-            st.markdown(f"""
-            <div class="card">
-                <div class="card-title">{icon('roadmap')} Future Roadmap & Preparation Strategy</div>
-                <div class="card-content">
-                    {st.session_state.roadmap}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            # Future Roadmap - using render_card to ensure proper HTML rendering
+            st.markdown(
+                render_card("Future Roadmap & Preparation Strategy", "roadmap", st.session_state.roadmap),
+                unsafe_allow_html=True
+            )
             
             if st.button("Find Matching Jobs", key="find_jobs_btn"):
                 st.session_state.current_step = 4
@@ -756,34 +792,35 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # Add a download section
-            st.markdown("""
+            # PDF download section with actual functionality
+            st.markdown(f"""
             <div class="card">
-                <div class="card-title">Download Analysis</div>
+                <div class="card-title">{icon('download')} Download Analysis</div>
                 <div class="card-content">
                     <p>Get a PDF copy of your resume analysis to review later.</p>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button("Download PDF Report"):
-                st.info("PDF report generation functionality will be implemented in the next version.")
+            if st.button("Generate PDF Report"):
+                with st.spinner("Generating PDF report..."):
+                    pdf_download_link = generate_pdf_report()
+                    st.markdown(pdf_download_link, unsafe_allow_html=True)
                 
-            # Add relevant skills visualization from resume
-            st.markdown("""
-            <div class="card">
-                <div class="card-title">Your Skills Analysis</div>
-                <div class="card-content">
-                """, unsafe_allow_html=True)
-            
-            # Display the skills we extracted from the resume
+            # Display skills list - show all skills without percentages
+            skills_html = "<ul class='skills-list'>"
             for skill in st.session_state.skills:
-                st.markdown(
-                    progress_bar(skill["level"], skill["name"], f"{skill['level']}%"), 
-                    unsafe_allow_html=True
-                )
-                
-            st.markdown("</div></div>", unsafe_allow_html=True)
+                skills_html += f"<li>{skill}</li>"
+            skills_html += "</ul>"
+            
+            st.markdown(f"""
+            <div class="card">
+                <div class="card-title">{icon('skills')} Your Skills</div>
+                <div class="card-content">
+                    {skills_html}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     
     # Step 4: Job Search
     elif st.session_state.current_step == 4:
@@ -792,7 +829,7 @@ def main():
                 st.markdown(render_loading("Generating optimal job search keywords..."), unsafe_allow_html=True)
                 keywords = ask_euriai(
                     f"Based on this resume summary, suggest the best job titles/keywords for searching jobs. Give a comma-separated list only, no explanation.\n\nSummary:\n{st.session_state.summary}",
-                    max_tokens=100
+                    max_tokens=200
                 )
                 st.session_state.search_keywords = keywords.replace("\n", "").strip()
         
@@ -815,14 +852,13 @@ def main():
             search_keywords_input = st.text_input("Edit keywords if needed:", value=st.session_state.search_keywords)
             
             # Search button
-            if st.button("Search Jobs", key="search_jobs_btn") or not st.session_state.linkedin_jobs:
-                with st.spinner("🚀 Fetching Jobs from LinkedIn and Naukri..."):
+            if st.button("Search Jobs", key="search_jobs_btn") or not st.session_state.naukri_jobs:
+                with st.spinner("🚀 Fetching Jobs from Naukri..."):
                     st.markdown(render_loading("Searching for matching jobs..."), unsafe_allow_html=True)
-                    st.session_state.linkedin_jobs = fetch_linkedin_jobs(search_query=search_keywords_input, location="India", rows=60)
                     st.session_state.naukri_jobs = fetch_naukri_jobs(search_query=search_keywords_input, max_jobs=60)
             
             # Display results count
-            total_jobs = len(st.session_state.linkedin_jobs) + len(st.session_state.naukri_jobs)
+            total_jobs = len(st.session_state.naukri_jobs)
             st.markdown(f"""
             <div class="results-summary">
                 <div class="results-number">{total_jobs}</div>
@@ -830,72 +866,37 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # Create tabs for LinkedIn and Naukri jobs
-            linkedin_tab, naukri_tab = st.tabs(["LinkedIn Jobs (India)", "Naukri Jobs (India)"])
-            
-            with linkedin_tab:
-                if st.session_state.linkedin_jobs:
-                    # Add filters for LinkedIn jobs
-                    col_location, col_sort = st.columns(2)
-                    with col_location:
-                        locations = ["All Locations"] + sorted(list(set([job.get('location', '').split(',')[0].strip() for job in st.session_state.linkedin_jobs if job.get('location')])))
-                        filter_location = st.selectbox("Filter by location:", locations, key="linkedin_location")
-                    
-                    with col_sort:
-                        sort_options = ["Relevance", "Most Recent", "Company Name"]
-                        sort_by = st.selectbox("Sort by:", sort_options, key="linkedin_sort")
-                    
-                    # Apply filters (without loading)
-                    filtered_jobs = st.session_state.linkedin_jobs
-                    if filter_location != "All Locations":
-                        filtered_jobs = [job for job in filtered_jobs if job.get('location', '').startswith(filter_location)]
-                    
-                    if sort_by == "Most Recent":
-                        # Using a fixed seed for consistency
-                        random.seed(42)
-                        filtered_jobs = sorted(filtered_jobs, key=lambda x: random.random())
-                    elif sort_by == "Company Name":
-                        filtered_jobs = sorted(filtered_jobs, key=lambda x: x.get('companyName', '').lower())
-                    
-                    # Display job count
-                    st.write(f"Showing {len(filtered_jobs)} LinkedIn jobs")
-                    
-                    for job in filtered_jobs:
-                        st.markdown(render_job_card(job, source="linkedin"), unsafe_allow_html=True)
-                else:
-                    st.info("No LinkedIn jobs found. Try adjusting your search keywords.")
-            
-            with naukri_tab:
-                if st.session_state.naukri_jobs:
-                    # Add filters for Naukri jobs
-                    col_location, col_sort = st.columns(2)
-                    with col_location:
-                        locations = ["All Locations"] + sorted(list(set([job.get('location', '').split(',')[0].strip() for job in st.session_state.naukri_jobs if job.get('location')])))
-                        filter_location = st.selectbox("Filter by location:", locations, key="naukri_location")
-                    
-                    with col_sort:
-                        sort_options = ["Relevance", "Most Recent", "Company Name"]
-                        sort_by = st.selectbox("Sort by:", sort_options, key="naukri_sort")
-                    
-                    # Apply filters (without loading)
-                    filtered_jobs = st.session_state.naukri_jobs
-                    if filter_location != "All Locations":
-                        filtered_jobs = [job for job in filtered_jobs if job.get('location', '').startswith(filter_location)]
-                    
-                    if sort_by == "Most Recent":
-                        # Using a different fixed seed for consistency
-                        random.seed(24)
-                        filtered_jobs = sorted(filtered_jobs, key=lambda x: random.random())
-                    elif sort_by == "Company Name":
-                        filtered_jobs = sorted(filtered_jobs, key=lambda x: x.get('companyName', '').lower())
-                    
-                    # Display job count
-                    st.write(f"Showing {len(filtered_jobs)} Naukri jobs")
-                    
-                    for job in filtered_jobs:
-                        st.markdown(render_job_card(job, source="naukri"), unsafe_allow_html=True)
-                else:
-                    st.info("No Naukri jobs found. Try adjusting your search keywords.")
+            # Display Naukri jobs directly (no tabs)
+            if st.session_state.naukri_jobs:
+                # Add filters for Naukri jobs
+                col_location, col_sort = st.columns(2)
+                with col_location:
+                    locations = ["All Locations"] + sorted(list(set([job.get('location', '').split(',')[0].strip() for job in st.session_state.naukri_jobs if job.get('location')])))
+                    filter_location = st.selectbox("Filter by location:", locations, key="naukri_location")
+                
+                with col_sort:
+                    sort_options = ["Relevance", "Most Recent", "Company Name"]
+                    sort_by = st.selectbox("Sort by:", sort_options, key="naukri_sort")
+                
+                # Apply filters (without loading)
+                filtered_jobs = st.session_state.naukri_jobs
+                if filter_location != "All Locations":
+                    filtered_jobs = [job for job in filtered_jobs if job.get('location', '').startswith(filter_location)]
+                
+                if sort_by == "Most Recent":
+                    # Using a fixed seed for consistency
+                    random.seed(24)
+                    filtered_jobs = sorted(filtered_jobs, key=lambda x: random.random())
+                elif sort_by == "Company Name":
+                    filtered_jobs = sorted(filtered_jobs, key=lambda x: x.get('companyName', '').lower())
+                
+                # Display job count
+                st.write(f"Showing {len(filtered_jobs)} Naukri jobs")
+                
+                for job in filtered_jobs:
+                    st.markdown(render_job_card(job, source="naukri"), unsafe_allow_html=True)
+            else:
+                st.info("No Naukri jobs found. Try adjusting your search keywords.")
                     
         with col2:
             # Add filter section

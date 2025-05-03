@@ -1,5 +1,5 @@
 from fastmcp import FastMCP
-from app import fetch_linkedin_jobs, fetch_naukri_jobs, ask_euriai
+from app import fetch_naukri_jobs, ask_euriai
 import logging
 import os
 from dotenv import load_dotenv
@@ -24,19 +24,10 @@ load_dotenv()
 # Initialize FastMCP server
 mcp = FastMCP(
     name="CareerBoost AI Job Fetcher",
-    description="API for fetching job listings from LinkedIn and Naukri"
+    description="API for fetching job listings from Naukri"
 )
 
-@mcp.tool(
-    description="Fetch job listings from Naukri.com based on search keywords",
-    parameters=[
-        {"name": "keywords", "description": "Job search keywords (comma-separated)", "type": "string", "required": True},
-        {"name": "max_jobs", "description": "Maximum number of jobs to fetch", "type": "integer", "default": 60},
-        {"name": "freshness", "description": "Job posting timeframe (all, 1d, 3d, 7d, 30d)", "type": "string", "default": "all"},
-        {"name": "experience", "description": "Experience level (all, 0-2, 3-5, 6-10, 10+)", "type": "string", "default": "all"},
-    ],
-    returns={"description": "List of job listings from Naukri.com"}
-)
+@mcp.tool("Fetch job listings from Naukri.com based on search keywords")
 def fetch_naukri(keywords, max_jobs=60, freshness="all", experience="all"):
     """
     Fetch job listings from Naukri.com based on provided parameters.
@@ -73,97 +64,7 @@ def fetch_naukri(keywords, max_jobs=60, freshness="all", experience="all"):
         logger.error(f"Error fetching Naukri jobs: {str(e)}")
         return {"error": str(e)}
 
-@mcp.tool(
-    description="Fetch job listings from LinkedIn based on search keywords",
-    parameters=[
-        {"name": "keywords", "description": "Job search keywords (comma-separated)", "type": "string", "required": True},
-        {"name": "location", "description": "Job location", "type": "string", "default": "India"},
-        {"name": "rows", "description": "Maximum number of jobs to fetch", "type": "integer", "default": 60},
-    ],
-    returns={"description": "List of job listings from LinkedIn"}
-)
-def fetch_linkedin(keywords, location="India", rows=60):
-    """
-    Fetch job listings from LinkedIn based on provided parameters.
-    
-    Args:
-        keywords (str): Job search keywords (comma-separated)
-        location (str): Job location
-        rows (int): Maximum number of jobs to fetch
-        
-    Returns:
-        list: Job listings from LinkedIn
-    """
-    logger.info(f"Fetching LinkedIn jobs with keywords: {keywords}, location: {location}")
-    try:
-        start_time = time.time()
-        jobs = fetch_linkedin_jobs(
-            search_query=keywords,
-            location=location,
-            rows=rows
-        )
-        duration = time.time() - start_time
-        logger.info(f"Found {len(jobs)} LinkedIn jobs in {duration:.2f} seconds")
-        return jobs
-    except Exception as e:
-        logger.error(f"Error fetching LinkedIn jobs: {str(e)}")
-        return {"error": str(e)}
-
-@mcp.tool(
-    description="Get combined job listings from both LinkedIn and Naukri",
-    parameters=[
-        {"name": "keywords", "description": "Job search keywords (comma-separated)", "type": "string", "required": True},
-        {"name": "location", "description": "Job location", "type": "string", "default": "India"},
-        {"name": "max_jobs", "description": "Maximum number of jobs to fetch per platform", "type": "integer", "default": 30},
-    ],
-    returns={"description": "Combined list of job listings from LinkedIn and Naukri"}
-)
-def fetch_all_jobs(keywords, location="India", max_jobs=30):
-    """
-    Fetch job listings from both LinkedIn and Naukri based on provided parameters.
-    
-    Args:
-        keywords (str): Job search keywords (comma-separated)
-        location (str): Job location
-        max_jobs (int): Maximum number of jobs to fetch per platform
-        
-    Returns:
-        dict: Combined job listings from LinkedIn and Naukri
-    """
-    logger.info(f"Fetching all jobs with keywords: {keywords}, location: {location}")
-    try:
-        start_time = time.time()
-        linkedin_jobs = fetch_linkedin_jobs(
-            search_query=keywords,
-            location=location,
-            rows=max_jobs
-        )
-        
-        naukri_jobs = fetch_naukri_jobs(
-            search_query=keywords,
-            max_jobs=max_jobs
-        )
-        
-        result = {
-            "linkedin": linkedin_jobs,
-            "naukri": naukri_jobs,
-            "total_count": len(linkedin_jobs) + len(naukri_jobs)
-        }
-        
-        duration = time.time() - start_time
-        logger.info(f"Found {result['total_count']} total jobs in {duration:.2f} seconds")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching all jobs: {str(e)}")
-        return {"error": str(e)}
-
-@mcp.tool(
-    description="Extract optimal keywords from resume text for job searching",
-    parameters=[
-        {"name": "resume_text", "description": "The full text of the resume", "type": "string", "required": True},
-    ],
-    returns={"description": "Comma-separated list of job search keywords"}
-)
+@mcp.tool("Extract optimal keywords from resume text for job searching")
 def extract_job_keywords(resume_text):
     """
     Analyze a resume and extract optimal job search keywords.
@@ -196,13 +97,7 @@ def extract_job_keywords(resume_text):
         logger.error(f"Error extracting job keywords: {str(e)}")
         return {"error": str(e)}
 
-@mcp.tool(
-    description="Perform a complete resume analysis",
-    parameters=[
-        {"name": "resume_text", "description": "The full text of the resume", "type": "string", "required": True},
-    ],
-    returns={"description": "Complete resume analysis including summary, skill gaps, and career roadmap"}
-)
+@mcp.tool("Perform a complete resume analysis")
 def analyze_resume(resume_text):
     """
     Perform a complete analysis of a resume.
@@ -257,14 +152,7 @@ def analyze_resume(resume_text):
         logger.error(f"Error analyzing resume: {str(e)}")
         return {"error": str(e)}
 
-@mcp.tool(
-    description="Get skills recommendations based on job market trends",
-    parameters=[
-        {"name": "current_skills", "description": "Comma-separated list of the person's current skills", "type": "string", "required": True},
-        {"name": "industry", "description": "Target industry or field", "type": "string", "required": True},
-    ],
-    returns={"description": "List of recommended skills to learn based on job market trends"}
-)
+@mcp.tool("Get skills recommendations based on job market trends")
 def get_skill_recommendations(current_skills, industry):
     """
     Get recommended skills to learn based on current skills and target industry.
@@ -310,15 +198,7 @@ def get_skill_recommendations(current_skills, industry):
         logger.error(f"Error getting skill recommendations: {str(e)}")
         return {"error": str(e)}
 
-@mcp.tool(
-    description="Generate a custom cover letter based on resume and job description",
-    parameters=[
-        {"name": "resume_text", "description": "The full text of the resume", "type": "string", "required": True},
-        {"name": "job_description", "description": "The job description text", "type": "string", "required": True},
-        {"name": "company_name", "description": "The name of the company", "type": "string", "required": True},
-    ],
-    returns={"description": "Customized cover letter tailored to the job"}
-)
+@mcp.tool("Generate a custom cover letter based on resume and job description")
 def generate_cover_letter(resume_text, job_description, company_name):
     """
     Generate a custom cover letter based on resume and job description.
@@ -368,11 +248,7 @@ def generate_cover_letter(resume_text, job_description, company_name):
         logger.error(f"Error generating cover letter: {str(e)}")
         return {"error": str(e)}
 
-@mcp.tool(
-    description="Get server status and statistics",
-    parameters=[],
-    returns={"description": "Current server status and usage statistics"}
-)
+@mcp.tool("Get server status and statistics")
 def get_server_status():
     """
     Get the current server status and usage statistics.
@@ -387,9 +263,7 @@ def get_server_status():
             "status": "online",
             "uptime": time.time() - server_start_time,
             "api_calls": {
-                "fetch_linkedin": api_call_counts.get("fetch_linkedin", 0),
                 "fetch_naukri": api_call_counts.get("fetch_naukri", 0),
-                "fetch_all_jobs": api_call_counts.get("fetch_all_jobs", 0),
                 "extract_job_keywords": api_call_counts.get("extract_job_keywords", 0),
                 "analyze_resume": api_call_counts.get("analyze_resume", 0),
                 "get_skill_recommendations": api_call_counts.get("get_skill_recommendations", 0),
@@ -419,8 +293,7 @@ def track_api_call(func):
     return wrapper
 
 # Apply the decorator to all API functions
-for func_name in ["fetch_linkedin", "fetch_naukri", "fetch_all_jobs", 
-                 "extract_job_keywords", "analyze_resume", 
+for func_name in ["fetch_naukri", "extract_job_keywords", "analyze_resume", 
                  "get_skill_recommendations", "generate_cover_letter"]:
     if hasattr(mcp, func_name):
         setattr(mcp, func_name, track_api_call(getattr(mcp, func_name)))
@@ -436,8 +309,8 @@ if __name__ == "__main__":
     logger.info(f"EURI API Key: {euriai_key_status}")
     
     try:
-        # Start the MCP server
+        # Start the MCP server without the port parameter
         logger.info("MCP Server starting on port 8080...")
-        mcp.run(port=8080)
+        mcp.run()  # Removed the port parameter
     except Exception as e:
         logger.error(f"Error starting MCP server: {str(e)}")

@@ -4,3 +4,6 @@ pymupdf
 python-dotenv
 apify-client
 fastmcp
+langchain
+pillow
+reportlab

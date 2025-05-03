@@ -10,9 +10,11 @@ from apify_client import ApifyClient
 from euriai import EuriaiClient
 import base64
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 
 # Load environment variables
 load_dotenv()
@@ -49,17 +51,21 @@ def extract_text_from_pdf(uploaded_file):
     except Exception as e:
         return f"Error extracting text from PDF: {str(e)}"
 
-# Extract skills using EuriAI client
+# Extract skills using EuriAI client with improved prompt structure
 def extract_skills_from_resume(resume_text):
-    # Use EuriAI to extract skills with improved prompt
-    skills_prompt = f"""Extract the top 10 technical skills from this resume.
-    Return ONLY a comma-separated list of skills, no additional text or explanations.
-    Make sure your response is complete and not cut off.
+    # Use EuriAI to extract skills with improved prompt that won't get cut off
+    skills_prompt = f"""Extract exactly 10 technical skills from this resume.
+    Your response must be ONLY a comma-separated list of skills with no preamble, no additional text, and no explanations.
+    Do not number the skills or add any formatting except commas between skills.
+    Do not add any commentary before or after the list.
     
     Resume text:
-    {resume_text}"""
+    {resume_text}
     
-    skills_response = ask_euriai(skills_prompt, max_tokens=200)
+    Remember: Return ONLY a comma-separated list of 10 skills, nothing else."""
+    
+    # Limit the token count to avoid cutoff issues
+    skills_response = ask_euriai(skills_prompt, max_tokens=150)
     
     # Parse the comma-separated response
     skills_list = [skill.strip() for skill in skills_response.split(',')]
@@ -72,64 +78,360 @@ def clean_response(response):
     return cleaned
 
 # Ask EURI AI to generate output with improved prompts to prevent cutoffs
-def ask_euriai(prompt, max_tokens=800):
-    # Add instructions for complete responses
+def ask_euriai(prompt, max_tokens=600):
+    # Add explicit instructions to ensure complete responses with styling and formatting
     enhanced_prompt = f"""{prompt}
 
-Please provide a complete, well-structured response with no cut-off sentences. 
-Ensure all points are fully explained and properly concluded.
-Do not leave any thoughts incomplete."""
+Important instructions:
+1. Provide a complete, well-structured response with no cut-off sentences.
+2. Keep your response concise and within {max_tokens} tokens.
+3. Format your response with proper headings, bullet points, and paragraphs.
+4. Use asterisks for emphasis on important points (*important*).
+5. Use numbered lists for sequential steps or prioritized items.
+6. Break content into clear sections with double line breaks between sections.
+7. Structure content to be easily scannable with clear organization.
+8. Do not ask any follow-up questions at the end of your response."""
     
     response = euriai_client.generate_completion(prompt=enhanced_prompt, temperature=0.5, max_tokens=max_tokens)
     if isinstance(response, dict) and 'choices' in response:
         return response['choices'][0]['message']['content']
     return response
 
-# Generate PDF report
+# Generate visually appealing PDF report with modern formatting
 def generate_pdf_report():
     try:
         # Create buffer
         buffer = io.BytesIO()
         
-        # Create document
-        doc = SimpleDocTemplate(buffer, pagesize=A4, title="Career Analysis Report")
+        # Create document with better margins
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=A4, 
+            title="Career Analysis Report",
+            leftMargin=0.75*inch,
+            rightMargin=0.75*inch,
+            topMargin=0.75*inch,
+            bottomMargin=0.75*inch
+        )
         
-        # Styles
+        # Improved styles
         styles = getSampleStyleSheet()
-        title_style = styles['Heading1']
-        subtitle_style = styles['Heading2']
-        normal_style = styles['Normal']
+        
+        # Custom styles with better formatting
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=28,
+            alignment=TA_CENTER,
+            spaceAfter=20,
+            textColor=colors.HexColor('#5C67DE'),
+            fontName='Helvetica-Bold'
+        )
+        
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle',
+            parent=styles['Heading2'],
+            fontSize=16,
+            fontName='Helvetica-Bold',
+            spaceAfter=12,
+            spaceBefore=16,
+            textColor=colors.HexColor('#31304D'),
+            borderWidth=1,
+            borderColor=colors.HexColor('#5C67DE'),
+            borderPadding=8,
+            borderRadius=6,
+            leftIndent=5,
+            backColor=colors.HexColor('#F1F5F9')
+        )
+        
+        section_title_style = ParagraphStyle(
+            'SectionTitle',
+            parent=styles['Heading3'],
+            fontSize=14,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#4A52B3'),
+            spaceBefore=10,
+            spaceAfter=6,
+            leftIndent=10
+        )
+        
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=11,
+            fontName='Helvetica',
+            leading=16,
+            alignment=TA_JUSTIFY,
+            spaceAfter=10,
+            firstLineIndent=15
+        )
+        
+        bullet_style = ParagraphStyle(
+            'BulletPoint',
+            parent=styles['Normal'],
+            fontSize=11,
+            fontName='Helvetica',
+            leading=16,
+            leftIndent=30,
+            bulletIndent=15,
+            spaceAfter=8
+        )
+        
+        skill_item_style = ParagraphStyle(
+            'SkillItem',
+            parent=styles['Normal'],
+            fontSize=11,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#31304D'),
+            backColor=colors.HexColor('#F9F9FF'),
+            spaceAfter=8,
+            alignment=TA_CENTER,
+            borderWidth=0.5,
+            borderColor=colors.HexColor('#5C67DE'),
+            borderPadding=6,
+            borderRadius=4
+        )
         
         # Content
         content = []
         
-        # Title
+        # Add a logo or header image
+        # Add some decorative elements and header
+        header_data = [
+            [Paragraph('<font color="#5C67DE" size="18"><b>CAREER</b></font> <font color="#31304D" size="18"><b>BOOST AI</b></font>', ParagraphStyle('Header', alignment=TA_CENTER, spaceAfter=0))]
+        ]
+        header_table = Table(header_data, colWidths=[7*inch])
+        header_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F9F9FF')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('ROUNDEDCORNERS', [8, 8, 8, 8]),
+        ]))
+        content.append(header_table)
+        content.append(Spacer(1, 20))
+        
+        # Title with better spacing
         content.append(Paragraph("Career Analysis Report", title_style))
-        content.append(Spacer(1, 20))
+        content.append(Spacer(1, 5))
         
-        # Resume Summary
+        # Date line
+        date_text = f"Generated on: {time.strftime('%B %d, %Y')}"
+        date_style = ParagraphStyle(
+            'DateStyle',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#64748B'),
+            alignment=TA_CENTER
+        )
+        content.append(Paragraph(date_text, date_style))
+        content.append(Spacer(1, 30))
+        
+        # Resume Summary with improved formatting and visual elements
         content.append(Paragraph("Resume Summary", subtitle_style))
-        content.append(Spacer(1, 10))
-        content.append(Paragraph(st.session_state.summary, normal_style))
+        content.append(Spacer(1, 5))
+        
+        # Parse and format the summary text with better visual structure
+        # First, let's try to identify if there are sections in the summary
+        summary_text = st.session_state.summary
+        
+        # Check if summary has markdown-style sections or paragraphs
+        if '##' in summary_text or '*' in summary_text:
+            # For markdown formatted text
+            sections = re.split(r'##\s+', summary_text)
+            if len(sections) > 1:
+                # We have markdown headings
+                for section in sections[1:]:  # Skip the first empty split
+                    section_parts = section.split('\n', 1)
+                    if len(section_parts) > 1:
+                        section_title, section_content = section_parts
+                        content.append(Paragraph(section_title.strip(), section_title_style))
+                        for para in section_content.strip().split('\n\n'):
+                            if para.strip():
+                                if para.strip().startswith('*') or para.strip().startswith('-'):
+                                    # This is a bullet point list
+                                    for bullet in para.strip().split('\n'):
+                                        if bullet.strip():
+                                            bullet_text = bullet.strip().lstrip('*-').strip()
+                                            content.append(Paragraph(f"• {bullet_text}", bullet_style))
+                                else:
+                                    content.append(Paragraph(para.strip(), normal_style))
+                    else:
+                        content.append(Paragraph(section.strip(), normal_style))
+            else:
+                # Just format paragraphs normally
+                for para in summary_text.split('\n\n'):
+                    if para.strip():
+                        if para.strip().startswith('*') or para.strip().startswith('-'):
+                            # This is a bullet point list
+                            for bullet in para.strip().split('\n'):
+                                if bullet.strip():
+                                    bullet_text = bullet.strip().lstrip('*-').strip()
+                                    content.append(Paragraph(f"• {bullet_text}", bullet_style))
+                        else:
+                            content.append(Paragraph(para.strip(), normal_style))
+        else:
+            # For regular text, just split by paragraphs
+            for para in summary_text.split('\n\n'):
+                if para.strip():
+                    content.append(Paragraph(para.strip(), normal_style))
+        
         content.append(Spacer(1, 20))
         
-        # Skill Gaps
+        # Skills section with visually appealing display
+        content.append(Paragraph("Your Top Skills", subtitle_style))
+        content.append(Spacer(1, 10))
+        
+        # Creating a more visually appealing grid for skills
+        skills_data = []
+        row = []
+        
+        # Ensure we have at least one row even with odd number of skills
+        if len(st.session_state.skills) % 2 != 0:
+            st.session_state.skills.append("")
+        
+        for i, skill in enumerate(st.session_state.skills, 1):
+            if skill.strip():  # Only add non-empty skills
+                skill_para = Paragraph(skill, skill_item_style)
+                row.append(skill_para)
+                if i % 2 == 0:
+                    skills_data.append(row)
+                    row = []
+        
+        # Add any remaining row
+        if row:
+            skills_data.append(row)
+        
+        if skills_data:
+            # Create a table with skills
+            skills_table = Table(skills_data, colWidths=[3*inch, 3*inch])
+            skills_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                ('TOPPADDING', (0, 0), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 20),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 20),
+            ]))
+            content.append(skills_table)
+        else:
+            content.append(Paragraph("No skills extracted", normal_style))
+        
+        content.append(Spacer(1, 20))
+        
+        # Skill Gaps with improved visual formatting
         content.append(Paragraph("Skill Gaps & Missing Areas", subtitle_style))
         content.append(Spacer(1, 10))
-        content.append(Paragraph(st.session_state.gaps, normal_style))
+        
+        # Format gaps as numbered items for better visual hierarchy
+        gaps_text = st.session_state.gaps
+        
+        # Check if gaps text already has numbered items or bullet points
+        if re.search(r'^\d+\.|\*\*|\-', gaps_text, re.MULTILINE):
+            # Text already has formatting, let's preserve it
+            gap_items = re.split(r'(?:\d+\.\s*\*\*|\*\*|\d+\.|\-\s*\*\*)', gaps_text)
+            titles = re.findall(r'(?:\d+\.\s*\*\*|\*\*|\d+\.|\-\s*\*\*)([^*\n]+)(?:\*\*)?', gaps_text)
+            
+            if len(titles) > 0:
+                for i, (title, content_part) in enumerate(zip(titles, gap_items[1:]), 1):
+                    content.append(Paragraph(f"{i}. <b>{title.strip()}</b>", section_title_style))
+                    
+                    # Split the content into paragraphs
+                    paragraphs = content_part.strip().split('\n\n')
+                    for para in paragraphs:
+                        if para.strip():
+                            content.append(Paragraph(para.strip(), normal_style))
+            else:
+                # Just format as normal paragraphs
+                for para in gaps_text.split('\n\n'):
+                    if para.strip():
+                        content.append(Paragraph(para.strip(), normal_style))
+        else:
+            # No clear formatting, treat as regular paragraphs
+            for para in gaps_text.split('\n\n'):
+                if para.strip():
+                    content.append(Paragraph(para.strip(), normal_style))
+                
         content.append(Spacer(1, 20))
         
-        # Future Roadmap
+        # Future Roadmap with improved formatting - treat differently
         content.append(Paragraph("Future Roadmap & Preparation Strategy", subtitle_style))
         content.append(Spacer(1, 10))
-        content.append(Paragraph(st.session_state.roadmap, normal_style))
-        content.append(Spacer(1, 20))
         
-        # Skills List
-        content.append(Paragraph("Your Skills", subtitle_style))
-        content.append(Spacer(1, 10))
-        skills_text = ", ".join(st.session_state.skills)
-        content.append(Paragraph(skills_text, normal_style))
+        # Format roadmap as sections and bullet points for better visual hierarchy
+        roadmap_text = st.session_state.roadmap
+        
+        # Look for section headings in the roadmap with markdown-style formatting
+        roadmap_sections = re.split(r'(?:\d+\.\s*\*\*|\*\*|\d+\.|\-\s*\*\*)', roadmap_text)
+        section_titles = re.findall(r'(?:\d+\.\s*\*\*|\*\*|\d+\.|\-\s*\*\*)([^*\n]+)(?:\*\*)?', roadmap_text)
+        
+        if len(section_titles) > 0:
+            # We have identified section titles
+            for i, (title, content_part) in enumerate(zip(section_titles, roadmap_sections[1:]), 1):
+                content.append(Paragraph(f"{i}. <b>{title.strip()}</b>", section_title_style))
+                
+                # Split the content into paragraphs and bullet points
+                if '-' in content_part or '*' in content_part:
+                    # Contains bullet points
+                    bullet_items = re.split(r'\n\s*[-*]\s+', content_part)
+                    for j, bullet in enumerate(bullet_items):
+                        if j == 0 and not bullet.strip():
+                            continue  # Skip empty first split
+                        if bullet.strip():
+                            if j == 0 and not (bullet.strip().startswith('-') or bullet.strip().startswith('*')):
+                                # This is an intro paragraph
+                                content.append(Paragraph(bullet.strip(), normal_style))
+                            else:
+                                content.append(Paragraph(f"• {bullet.strip()}", bullet_style))
+                else:
+                    # Just regular paragraphs
+                    paragraphs = content_part.strip().split('\n\n')
+                    for para in paragraphs:
+                        if para.strip():
+                            content.append(Paragraph(para.strip(), normal_style))
+        else:
+            # No clear section formatting, check for standard bullet points
+            if '-' in roadmap_text or '*' in roadmap_text:
+                # Try to identify bullet point lists
+                paragraphs = roadmap_text.split('\n\n')
+                for para in paragraphs:
+                    if para.strip().startswith('-') or para.strip().startswith('*') or '\n-' in para or '\n*' in para:
+                        # This paragraph contains bullet points
+                        bullet_items = para.split('\n')
+                        for bullet in bullet_items:
+                            if bullet.strip():
+                                if bullet.strip().startswith('-') or bullet.strip().startswith('*'):
+                                    bullet_text = bullet.strip().lstrip('-*').strip()
+                                    content.append(Paragraph(f"• {bullet_text}", bullet_style))
+                                else:
+                                    content.append(Paragraph(bullet.strip(), normal_style))
+                    else:
+                        # Regular paragraph
+                        content.append(Paragraph(para.strip(), normal_style))
+            else:
+                # Just regular paragraphs
+                for para in roadmap_text.split('\n\n'):
+                    if para.strip():
+                        content.append(Paragraph(para.strip(), normal_style))
+        
+        # Add a visually appealing footer with contact info and branding
+        content.append(Spacer(1, 30))
+        
+        # Footer with horizontal line
+        footer_data = [
+            [Paragraph('<font color="#5C67DE" size="9"><b>CareerBoost AI</b></font> | <font color="#64748B" size="9">Resume Analysis & Job Matching Platform</font>', 
+                      ParagraphStyle('Footer', alignment=TA_CENTER, spaceAfter=0))]
+        ]
+        footer_table = Table(footer_data, colWidths=[7*inch])
+        footer_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('LINEABOVE', (0, 0), (-1, 0), 0.5, colors.HexColor('#E2E8F0')),
+        ]))
+        content.append(footer_table)
         
         # Build PDF
         doc.build(content)
@@ -140,7 +442,7 @@ def generate_pdf_report():
         
         # Encode to base64 for download
         b64 = base64.b64encode(pdf_data).decode()
-        href = f'<a href="data:application/pdf;base64,{b64}" download="career_analysis_report.pdf" class="job-apply-btn" style="text-decoration:none;">Download PDF Report</a>'
+        href = f'<a href="data:application/pdf;base64,{b64}" download="career_analysis_report.pdf" class="job-apply-btn" style="text-decoration:none;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download PDF Report</a>'
         return href
         
     except Exception as e:
@@ -561,7 +863,7 @@ def icon(name):
     }
     return icons.get(name, "")
 
-# Format job cards
+# Format job cards with improved visual styling
 def render_job_card(job, source="naukri"):
     job_title = job.get('title', 'Position')
     company = job.get('companyName', 'Company')
@@ -574,28 +876,51 @@ def render_job_card(job, source="naukri"):
     elif not link.startswith(('http://', 'https://')):
         link = f"https://{link}"
     
+    # Enhanced styling for job cards
     html = f"""
-    <div class="job-card">
-        <div class="job-title">{job_title}</div>
-        <div class="company-name">{company}</div>
-        <div class="job-meta">
-            {icon('location')} {location}
+    <div class="job-card" style="border-radius: 12px; transition: transform 0.3s, box-shadow 0.3s; border-left: 5px solid #F4CE14; position: relative; overflow: hidden;">
+        <div style="position: absolute; top: 0; right: 0; background-color: #f1f5f9; color: #64748b; font-size: 0.7rem; padding: 3px 8px; border-radius: 0 0 0 8px;">Naukri</div>
+        <div class="job-title" style="font-size: 1.25rem; font-weight: 700; margin-bottom: 8px; color: #31304D;">{job_title}</div>
+        <div class="company-name" style="font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: #5C67DE;">{company}</div>
+        <div class="job-meta" style="display: flex; align-items: center; margin-bottom: 12px; color: #64748b;">
+            {icon('location')} <span style="margin-left: 5px;">{location}</span>
         </div>
-        <a href="{link}" target="_blank" rel="noopener noreferrer" class="job-apply-btn">View Job</a>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <a href="{link}" target="_blank" rel="noopener noreferrer" class="job-apply-btn" style="background-color: #5C67DE; padding: 8px 16px;">View Job</a>
+            <button class="custom-button-secondary" style="background-color: transparent; border: 1px solid #5C67DE; color: #5C67DE; padding: 8px 16px; border-radius: 50px; cursor: pointer; font-size: 0.9rem;">Save</button>
+        </div>
     </div>
     """
     return html
 
-# Render card with proper HTML cleaning
+# Render card with improved visual formatting
 def render_card(title, icon_name, content):
     # Clean the content to ensure no cut-off HTML
     cleaned_content = clean_response(content)
     
+    # Process the content to enhance formatting
+    # Replace Markdown-style headings with styled HTML headings
+    formatted_content = re.sub(r'\*\*([^*]+)\*\*', r'<span style="font-weight: bold; color: #31304D;">\1</span>', cleaned_content)
+    
+    # Format numbered lists with better styling
+    formatted_content = re.sub(r'(\d+\.\s)([^\n]+)', 
+                              r'<div style="margin-bottom: 10px;"><span style="font-weight: bold; color: #5C67DE; margin-right: 5px;">\1</span>\2</div>', 
+                              formatted_content)
+    
+    # Format bullet points with better styling
+    formatted_content = re.sub(r'(-|\•|\*)\s([^\n]+)', 
+                              r'<div style="margin-bottom: 8px; margin-left: 15px;"><span style="color: #5C67DE; margin-right: 5px;">•</span>\2</div>', 
+                              formatted_content)
+    
+    # Convert newlines to proper HTML breaks with spacing
+    formatted_content = formatted_content.replace('\n\n', '<div style="margin-bottom: 15px;"></div>')
+    formatted_content = formatted_content.replace('\n', '<br>')
+    
     html = f"""
-    <div class="card">
-        <div class="card-title">{icon(icon_name)} {title}</div>
-        <div class="card-content">
-            {cleaned_content}
+    <div class="card" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);">
+        <div class="card-title" style="font-size: 1.5rem; font-weight: 700; padding-bottom: 12px; border-bottom: 1px solid #eaeaea; margin-bottom: 15px;">{icon(icon_name)} {title}</div>
+        <div class="card-content" style="font-size: 1rem; line-height: 1.6; color: #333;">
+            {formatted_content}
         </div>
     </div>
     """
@@ -612,35 +937,35 @@ def render_header():
 
 # Create progress steps with fixed HTML
 def render_progress_steps(current_step):
-    # Create all steps HTML directly without any conditional logic in f-strings
+    # Set the status for each step
     step1_status = "completed" if current_step > 1 else "active" if current_step == 1 else ""
     step2_status = "completed" if current_step > 2 else "active" if current_step == 2 else ""
     step3_status = "completed" if current_step > 3 else "active" if current_step == 3 else ""
     step4_status = "completed" if current_step > 4 else "active" if current_step == 4 else ""
     
-    html = """
+    html = f"""
     <div class="step-container">
-        <div class="step {0}">
+        <div class="step {step1_status}">
             <div class="step-number">1</div>
             <div class="step-title">Upload Resume</div>
             <div class="step-connector"></div>
         </div>
-        <div class="step {1}">
+        <div class="step {step2_status}">
             <div class="step-number">2</div>
             <div class="step-title">AI Analysis</div>
             <div class="step-connector"></div>
         </div>
-        <div class="step {2}">
+        <div class="step {step3_status}">
             <div class="step-number">3</div>
             <div class="step-title">Career Insights</div>
             <div class="step-connector"></div>
         </div>
-        <div class="step {3}">
+        <div class="step {step4_status}">
             <div class="step-number">4</div>
             <div class="step-title">Find Jobs</div>
         </div>
     </div>
-    """.format(step1_status, step2_status, step3_status, step4_status)
+    """
     
     return html
 
@@ -734,19 +1059,77 @@ def main():
             st.markdown("<h2>AI Resume Analysis</h2>", unsafe_allow_html=True)
             st.markdown("<p>Our AI is analyzing your resume to provide personalized insights.</p>", unsafe_allow_html=True)
             
+            # Enhanced prompts for visually structured results
             with st.spinner("✍️ Summarizing Resume..."):
                 st.markdown(render_loading("Analyzing resume content..."), unsafe_allow_html=True)
-                st.session_state.summary = ask_euriai(f"Summarize this resume highlighting skills, education, and experience:\n\n{st.session_state.resume_text}", max_tokens=800)
+                
+                summary_prompt = f"""Provide a detailed but concise summary of this resume highlighting key skills, education, and experience.
+                Format the summary with the following structure:
+                
+                • Start with an opening paragraph introducing the candidate. 
+                • Use clear paragraphs with proper spacing.
+                • Highlight key skills and competencies.
+                • Emphasize educational background and certifications.
+                • Showcase relevant experience and projects.
+                
+                Make your response visually scannable with proper formatting.
+                Keep your response under 400 words total to ensure it doesn't get cut off.
+                
+                Resume text:
+                {st.session_state.resume_text}"""
+                
+                st.session_state.summary = ask_euriai(summary_prompt, max_tokens=500)
             
             with st.spinner("🔎 Finding Skill Gaps..."):
                 st.markdown(render_loading("Identifying skill gaps..."), unsafe_allow_html=True)
-                st.session_state.gaps = ask_euriai(f"Analyze this resume and highlight missing skills, certifications, or experiences needed for better job opportunities:\n\n{st.session_state.resume_text}", max_tokens=800)
+                
+                gaps_prompt = f"""Analyze this resume and identify 3-5 specific skill gaps, missing certifications, or experiences that would improve job prospects.
+                
+                Format your response with the following structure:
+                • Number each skill gap (1., 2., 3., etc.)
+                • For each gap, use a bold heading with double asterisks: **Skill Gap Title**
+                • Under each heading, provide 2-3 sentences explaining why this skill matters and how it would improve employability
+                • Suggest specific ways to address each gap (courses, certifications, projects)
+                
+                Make your response visually appealing with clear formatting and organization.
+                Keep your response under 400 words total.
+                
+                Resume text:
+                {st.session_state.resume_text}"""
+                
+                st.session_state.gaps = ask_euriai(gaps_prompt, max_tokens=500)
             
             with st.spinner("🚀 Creating Future Roadmap..."):
                 st.markdown(render_loading("Preparing career roadmap..."), unsafe_allow_html=True)
-                st.session_state.roadmap = ask_euriai(f"Based on this resume, suggest a future roadmap to improve this person's career prospects (skills to learn, certifications needed, industry exposure):\n\n{st.session_state.resume_text}", max_tokens=800)
                 
-            # Extract skills using EuriAI
+                roadmap_prompt = f"""Create a visually structured 6-month career development roadmap based on this resume.
+                
+                Format the roadmap with these clearly defined sections:
+                
+                **1. Short-term Goals (1-2 months)**
+                • Use bullet points for each recommendation
+                • Be specific about courses, skills, or projects to pursue
+                • Explain the expected outcome of each action
+                
+                **2. Medium-term Improvements (3-4 months)**
+                • Use bullet points for each recommendation
+                • Focus on skills that build on the short-term foundations
+                • Include specific certification recommendations if applicable
+                
+                **3. Long-term Strategy (5-6 months)**
+                • Use bullet points for each recommendation
+                • Include networking and portfolio development strategies
+                • Suggest ways to demonstrate the new skills to employers
+                
+                Make the roadmap visually organized, easy to follow, and actionable.
+                Keep your response under 400 words total with clear structure.
+                
+                Resume text:
+                {st.session_state.resume_text}"""
+                
+                st.session_state.roadmap = ask_euriai(roadmap_prompt, max_tokens=500)
+                
+            # Extract skills using EuriAI with improved prompt
             with st.spinner("🔍 Extracting Skills..."):
                 st.session_state.skills = extract_skills_from_resume(st.session_state.resume_text)
             
@@ -760,19 +1143,19 @@ def main():
         with col1:
             st.markdown("<h2>Career Insights & Analysis</h2>", unsafe_allow_html=True)
             
-            # Resume Summary - using render_card to ensure proper HTML rendering
+            # Resume Summary - using render_card with improved formatting
             st.markdown(
                 render_card("Resume Summary", "resume", st.session_state.summary),
                 unsafe_allow_html=True
             )
             
-            # Skill Gaps - using render_card to ensure proper HTML rendering
+            # Skill Gaps - using render_card with improved formatting
             st.markdown(
                 render_card("Skill Gaps & Missing Areas", "skills", st.session_state.gaps),
                 unsafe_allow_html=True
             )
             
-            # Future Roadmap - using render_card to ensure proper HTML rendering
+            # Future Roadmap - using render_card with improved formatting
             st.markdown(
                 render_card("Future Roadmap & Preparation Strategy", "roadmap", st.session_state.roadmap),
                 unsafe_allow_html=True
@@ -792,7 +1175,7 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # PDF download section with actual functionality
+            # PDF download section with better formatting
             st.markdown(f"""
             <div class="card">
                 <div class="card-title">{icon('download')} Download Analysis</div>
@@ -824,13 +1207,22 @@ def main():
     
     # Step 4: Job Search
     elif st.session_state.current_step == 4:
+        # Generate search keywords if not already present
         if not st.session_state.search_keywords:
             with st.spinner("🔍 Extracting best keywords from resume..."):
                 st.markdown(render_loading("Generating optimal job search keywords..."), unsafe_allow_html=True)
-                keywords = ask_euriai(
-                    f"Based on this resume summary, suggest the best job titles/keywords for searching jobs. Give a comma-separated list only, no explanation.\n\nSummary:\n{st.session_state.summary}",
-                    max_tokens=200
-                )
+                
+                # Improved prompt for keywords generation
+                keywords_prompt = f"""Based on this resume summary and skills, suggest 3-5 best job titles/keywords for searching jobs.
+                Return ONLY a comma-separated list of keywords with no explanations or additional text.
+                
+                Summary:
+                {st.session_state.summary}
+                
+                Skills:
+                {', '.join(st.session_state.skills)}"""
+                
+                keywords = ask_euriai(keywords_prompt, max_tokens=100)
                 st.session_state.search_keywords = keywords.replace("\n", "").strip()
         
         col1, col2 = st.columns([3, 1])
